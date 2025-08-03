@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Redipost Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rethink+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <h1>
+          <span class="logo-icon"></span>
+          Redipost 
+          <span class="beta-label">BETA</span>
+        </h1>
+        <p>Smart Reddit Post Assistant</p>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <!-- Post Draft Section -->
+      <section class="post-draft">
+        <h2>
+          <span class="step-icon"></span>
+          Draft Your Post
+        </h2>
+        
+        <div class="input-group">
+          <label for="post-title">
+            Post Title
+            <span class="required-indicator">*</span>
+          </label>
+          <input 
+            type="text" 
+            id="post-title" 
+            placeholder="Enter an engaging title for your post..."
+            maxlength="300"
+            autocomplete="off"
+            spellcheck="true"
+          >
+          <div class="char-count">
+            <span id="title-count">0</span>/300
+          </div>
+          <div class="input-hint">
+            Clear, specific titles get more engagement
+          </div>
+        </div>
+
+        <div class="input-group">
+          <label for="post-body">
+            Post Body
+            <span class="optional-indicator">(optional)</span>
+          </label>
+          <textarea 
+            id="post-body" 
+            placeholder="Write your post content here... Be descriptive and engaging!"
+            rows="6"
+            maxlength="40000"
+            spellcheck="true"
+          ></textarea>
+          <div class="char-count">
+            <span id="body-count">0</span>/40000
+          </div>
+          <div class="input-hint">
+            Well-structured posts with paragraphs perform better
+          </div>
+        </div>
+
+        <div class="action-section">
+          <button id="analyze-btn" class="btn-primary" disabled>
+            <span class="btn-icon"></span>
+            Find Perfect Subreddits
+          </button>
+          <div class="keyboard-hint">
+            <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to analyze
+          </div>
+        </div>
+      </section>
+
+      <!-- Subreddit Suggestions -->
+      <section class="subreddit-suggestions" id="suggestions-section" style="display: none;">
+        <div class="section-header">
+          <h2>
+            <span class="step-icon"></span>
+            Perfect Subreddits for You
+          </h2>
+          <div class="section-subtitle">
+            AI-curated communities where your post will thrive
+          </div>
+        </div>
+        
+        <div class="loading" id="suggestions-loading" style="display: none;">
+          <div class="spinner"></div>
+          <p>Finding the perfect subreddits for your post...</p>
+          <div class="loading-tips">
+            <div class="loading-tip">Analyzing post content...</div>
+            <div class="loading-tip">Checking community fit...</div>
+            <div class="loading-tip">Ranking by engagement potential...</div>
+          </div>
+        </div>
+        
+        <div class="suggestions-container" id="suggestions-container"></div>
+      </section>
+
+      <!-- Selected Subreddit Rules and Optimized Post -->
+      <section class="selected-subreddit" id="selected-section" style="display: none;">
+        <div class="selected-header">
+          <h2>
+            <span class="step-icon"></span>
+            r/<span id="selected-subreddit-name"></span>
+          </h2>
+          <button id="back-btn" class="btn-back">
+            <span>←</span> Back to Suggestions
+          </button>
+        </div>
+        
+        <div class="rules-section">
+          <h3>
+            <span class="section-icon"></span>
+            Community Rules
+          </h3>
+          <div class="loading" id="rules-loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Loading community rules...</p>
+          </div>
+          <div class="rules-content" id="rules-content"></div>
+          
+          <!-- Optimize Post Button -->
+          <div class="optimize-action" id="optimize-action" style="display: none;">
+            <button id="optimize-btn" class="btn-primary">
+              <span class="btn-icon">AI</span>
+              Optimize Post
+            </button>
+            <div class="optimize-hint">
+              Click to optimize your post based on the community rules above
+            </div>
+          </div>
+        </div>
+
+        <div class="optimized-post" id="optimized-section" style="display: none;">
+          <h3>
+            <span class="section-icon"></span>
+            Your Optimized Post
+          </h3>
+          <div class="loading" id="optimization-loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Optimizing your post for maximum engagement...</p>
+            <div class="loading-tips">
+              <div class="loading-tip">Adapting to community rules...</div>
+              <div class="loading-tip">Improving title and content...</div>
+              <div class="loading-tip">Maximizing engagement potential...</div>
+            </div>
+          </div>
+          
+          <div class="optimized-content" id="optimized-content">
+            <div class="optimized-field">
+              <label>
+                <span class="field-icon"></span>
+                Optimized Title:
+              </label>
+              <div class="optimized-text-container">
+                <div class="optimized-text" id="optimized-title"></div>
+                <button id="copy-title-btn" class="copy-btn" title="Copy title to clipboard">
+                  <span class="copy-icon">📋</span>
+                </button>
+              </div>
+            </div>
+            
+            <div class="optimized-field">
+              <label>
+                <span class="field-icon"></span>
+                Optimized Body:
+              </label>
+              <div class="optimized-text-container">
+                <div class="optimized-text" id="optimized-body"></div>
+                <button id="copy-body-btn" class="copy-btn" title="Copy body to clipboard">
+                  <span class="copy-icon">📋</span>
+                </button>
+              </div>
+            </div>
+            
+            <div class="changes-summary" id="changes-summary"></div>
+          </div>
+        </div>
+
+        <div class="action-section">
+          <button id="open-subreddit-btn" class="btn-success" style="display: none;" title="This will open the selected subreddit in a new tab">
+            <span class="btn-icon">🔗</span>
+            Open r/<span id="open-subreddit-name"></span>
+          </button>
+          <div class="open-hint">
+            Click to open the selected subreddit where you can manually create your post
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer-content">
+        <p>Made with passion for Reddit creators</p>
+        <div class="tips-rotation">
+          <div class="tip active"><strong>Tip:</strong> Posts are optimized based on subreddit rules!</div>
+          <div class="tip"><strong>Tip:</strong> Engage with comments to boost visibility!</div>
+          <div class="tip"><strong>Tip:</strong> Post during peak hours for better reach!</div>
+          <div class="tip"><strong>Tip:</strong> Don't forget to add appropriate flair!</div>
+        </div>
+        <div class="footer-links">
+          <a href="mailto:sanjhaiprakash18@gmail.com" id="support-link">Support</a>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Toast Container for Notifications -->
+  <div id="toast-container" style="
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 10000;
+    pointer-events: none;
+  "></div>
+
+  <script src="sidebar.js"></script>
+</body>
+</html>
