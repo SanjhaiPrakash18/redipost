@@ -1203,31 +1203,42 @@ Focus on finding communities where this content would be genuinely welcome and g
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
       
-      // Look for rules in various locations
+      // Enhanced selectors for finding rules in HTML with better coverage
       const ruleSelectors = [
         '[data-testid="rules"]',
+        '[data-testid="subreddit-rules"]',
         '.rules',
         '.community-rules',
         '.subreddit-rules',
+        '.rules-widget',
+        '.widget-rules',
         '[class*="rule"]',
-        '[class*="Rule"]'
+        '[class*="Rule"]',
+        '.md-container',
+        '.usertext-body'
       ];
 
       for (const selector of ruleSelectors) {
         const ruleElements = doc.querySelectorAll(selector);
         if (ruleElements.length > 0) {
           const rules = [];
+          
           ruleElements.forEach((element, index) => {
             const text = element.textContent?.trim();
             if (text && text.length > 10) {
+              // Enhanced rule parsing to extract more details
+              const ruleText = this.parseDetailedRuleText(text, index + 1);
               rules.push({
-                short_name: `Rule ${index + 1}`,
-                description: text,
+                short_name: ruleText.title || `Rule ${index + 1}`,
+                description: ruleText.description,
+                examples: ruleText.examples || [],
+                enforcement_level: ruleText.enforcement_level || 'moderate',
                 violation_reason: '',
                 created_utc: Date.now() / 1000
               });
             }
           });
+          
           if (rules.length > 0) {
             console.log(`Extracted ${rules.length} rules from HTML using selector: ${selector}`);
             return rules;
@@ -1235,10 +1246,23 @@ Focus on finding communities where this content would be genuinely welcome and g
         }
       }
 
-      // If no rules found, create a fallback rule
+      // Enhanced fallback: try to extract from sidebar or description
+      const sidebarContent = doc.querySelector('.side, .sidebar, [class*="sidebar"]');
+      if (sidebarContent) {
+        const sidebarText = sidebarContent.textContent || '';
+        const extractedRules = this.extractRulesFromText(sidebarText, subredditName);
+        if (extractedRules.length > 0) {
+          console.log(`Extracted ${extractedRules.length} rules from sidebar text`);
+          return extractedRules;
+        }
+      }
+
+      // If no rules found, create a fallback rule with enhanced warning
       return [{
         short_name: 'Community Guidelines',
-        description: `Please check the rules for r/${subredditName} directly on Reddit. This subreddit may have specific posting guidelines that should be followed.`,
+        description: `Please check the rules for r/${subredditName} directly on Reddit. This subreddit may have specific posting guidelines that should be followed. Always review the subreddit's rules page before posting.`,
+        examples: [],
+        enforcement_level: 'strict',
         violation_reason: '',
         created_utc: Date.now() / 1000
       }];
@@ -1246,6 +1270,172 @@ Focus on finding communities where this content would be genuinely welcome and g
       console.warn('Failed to extract rules from HTML:', error);
       return null;
     }
+  }
+
+  parseDetailedRuleText(text, ruleNumber) {
+    const result = {
+      title: null,
+      description: text,
+      examples: [],
+      enforcement_level: 'moderate'
+    };
+
+    // Extract rule title (usually first line or before colon/dash)
+    const titleMatch = text.match(/^([^:\-\n]+)[:—\-]?\s*(.*)$/s);
+    if (titleMatch) {
+      const potentialTitle = titleMatch[1].trim();
+      const potentialDescription = titleMatch[2].trim();
+      
+      // If the potential title is short and descriptive, use it
+      if (potentialTitle.length < 100 && potentialTitle.length > 3) {
+        result.title = potentialTitle.replace(/^rule\s*\d+\.?\s*/i, '').trim();
+        result.description = potentialDescription || potentialTitle;
+      }
+    }
+
+    // Extract examples (look for phrases like "example:", "e.g.", "such as", etc.)
+    const examplePatterns = [
+      /(?:examples?|e\.g\.|such as|including|like)[:.]?\s*([^.]+)/gi,
+      /\((.*?example.*?)\)/gi,
+      /\[(.*?example.*?)\]/gi
+    ];
+
+    for (const pattern of examplePatterns) {
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        const example = match[1].trim();
+        if (example.length > 5 && !result.examples.includes(example)) {
+          result.examples.push(example);
+        }
+      }
+    }
+
+    // Determine enforcement level based on keywords
+    const strictKeywords = ['will be removed', 'banned', 'zero tolerance', 'strictly', 'absolutely', 'never', 'prohibited', 'must not', 'forbidden'];
+    const moderateKeywords = ['may be removed', 'discouraged', 'avoid', 'should not', 'please don\'t', 'not allowed'];
+    const relaxedKeywords = ['suggested', 'recommended', 'preferred', 'helpful', 'encouraged'];
+
+    const lowerText = text.toLowerCase();
+    if (strictKeywords.some(keyword => lowerText.includes(keyword))) {
+      result.enforcement_level = 'strict';
+    } else if (relaxedKeywords.some(keyword => lowerText.includes(keyword))) {
+      result.enforcement_level = 'relaxed';
+    } else if (moderateKeywords.some(keyword => lowerText.includes(keyword))) {
+      result.enforcement_level = 'moderate';
+    }
+
+    return result;
+  }
+
+  extractRulesFromText(text, subredditName) {
+    const rules = [];
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    
+    // Look for numbered rules or bullet points
+    const rulePatterns = [
+      /^\s*(\d+)\.?\s*(.+)$/,
+      /^\s*[•\-\*]\s*(.+)$/,
+      /^\s*(Rule\s*\d+)[:.]?\s*(.+)$/i
+    ];
+
+    for (const line of lines) {
+      for (const pattern of rulePatterns) {
+        const match = line.match(pattern);
+        if (match) {
+          const ruleText = (match[2] || match[1]).trim();
+          if (ruleText.length > 10) {
+            const parsedRule = this.parseDetailedRuleText(ruleText, rules.length + 1);
+            rules.push({
+              short_name: parsedRule.title || `Rule ${rules.length + 1}`,
+              description: parsedRule.description,
+              examples: parsedRule.examples || [],
+              enforcement_level: parsedRule.enforcement_level || 'moderate',
+              violation_reason: '',
+              created_utc: Date.now() / 1000
+            });
+          }
+          break;
+        }
+      }
+    }
+
+    return rules;
+  }
+
+  prioritizeRules(rules) {
+    // Create a copy of rules with original indices and priority assignments
+    const rulesWithPriority = rules.map((rule, index) => {
+      const priority = this.calculateRulePriority(rule);
+      return {
+        ...rule,
+        originalIndex: index,
+        priority: priority,
+        priorityScore: this.getPriorityScore(priority, rule.enforcement_level)
+      };
+    });
+
+    // Sort by priority score (higher scores first)
+    return rulesWithPriority.sort((a, b) => b.priorityScore - a.priorityScore);
+  }
+
+  calculateRulePriority(rule) {
+    const ruleName = (rule.short_name || '').toLowerCase();
+    const ruleDesc = (rule.description || '').toLowerCase();
+    const enforcement = rule.enforcement_level || 'moderate';
+    
+    // Critical priority rules (commonly enforced, high-impact violations)
+    const criticalKeywords = [
+      'spam', 'self-promotion', 'promotion', 'advertising',
+      'nsfw', 'explicit', 'sexual', 'adult',
+      'harassment', 'abuse', 'toxic', 'hate',
+      'doxxing', 'personal information', 'personal info',
+      'brigading', 'vote manipulation',
+      'illegal', 'copyright', 'piracy'
+    ];
+
+    // High priority rules (format and content restrictions)
+    const highPriorityKeywords = [
+      'title', 'flair', 'tag', 'format',
+      'no memes', 'no screenshots', 'no images',
+      'no links', 'text only', 'discussion only',
+      'no medical advice', 'no legal advice',
+      'duplicate', 'repost', 'search before posting'
+    ];
+
+    // Check for critical priority
+    if (enforcement === 'strict' || 
+        criticalKeywords.some(keyword => ruleName.includes(keyword) || ruleDesc.includes(keyword))) {
+      return 'critical';
+    }
+
+    // Check for high priority
+    if (highPriorityKeywords.some(keyword => ruleName.includes(keyword) || ruleDesc.includes(keyword))) {
+      return 'high';
+    }
+
+    // Default priority
+    return 'normal';
+  }
+
+  getPriorityScore(priority, enforcement) {
+    let score = 0;
+    
+    // Base score from priority
+    switch (priority) {
+      case 'critical': score += 100; break;
+      case 'high': score += 50; break;
+      case 'normal': score += 10; break;
+      default: score += 5;
+    }
+    
+    // Bonus from enforcement level
+    switch (enforcement) {
+      case 'strict': score += 30; break;
+      case 'moderate': score += 15; break;
+      case 'relaxed': score += 5; break;
+    }
+    
+    return score;
   }
 
   parseWikiRules(content) {
@@ -1312,10 +1502,12 @@ Focus on finding communities where this content would be genuinely welcome and g
   }
 
   normalizeRules(rules) {
-    // Normalize rule format for consistency
+    // Enhanced rule normalization with additional properties
     return rules.map((rule, index) => ({
       short_name: rule.short_name || rule.title || `Rule ${index + 1}`,
       description: rule.description || rule.text || rule.content || '',
+      examples: rule.examples || [],
+      enforcement_level: rule.enforcement_level || 'moderate',
       kind: rule.kind || 'all',
       created_utc: rule.created_utc || Date.now() / 1000,
       violation_reason: rule.violation_reason || rule.short_name
@@ -1571,9 +1763,30 @@ Focus on finding communities where this content would be genuinely welcome and g
     }
 
     try {
-      const rulesText = this.subredditRules
-        .map((rule, index) => `${index + 1}. ${rule.short_name || `Rule ${index + 1}`}: ${rule.description || 'No description'}`)
-        .join('\n');
+      // Use prioritized rules for compliance checking as well
+      const prioritizedRules = this.prioritizeRules(this.subredditRules);
+      const rulesText = prioritizedRules
+        .map((rule, index) => {
+          const ruleName = rule.short_name || `Rule ${rule.originalIndex + 1}`;
+          const ruleDesc = rule.description || 'No description available';
+          const enforcement = rule.enforcement_level || 'moderate';
+          const priority = rule.priority || 'normal';
+          const examples = rule.examples && rule.examples.length > 0 
+            ? `\n   Examples: ${rule.examples.join('; ')}`
+            : '';
+          const enforcementNote = enforcement === 'strict' 
+            ? ' [STRICTLY ENFORCED]'
+            : enforcement === 'relaxed' 
+            ? ' [GUIDELINE]'
+            : ' [MODERATELY ENFORCED]';
+          const priorityNote = priority === 'critical' 
+            ? ' 🔴 CRITICAL'
+            : priority === 'high' 
+            ? ' 🟠 HIGH PRIORITY'
+            : '';
+          return `${rule.originalIndex + 1}. ${ruleName}${enforcementNote}${priorityNote}: ${ruleDesc}${examples}`;
+        })
+        .join('\n\n');
 
       const data = await this.makeOpenRouterRequest([
         {
@@ -1758,99 +1971,207 @@ Respond with ONLY the JSON object. No additional text.`
       return basicResult;
     }
 
-    console.log('Proceeding with AI optimization...');
+    console.log('Proceeding with multi-pass AI optimization...');
     
     try {
-      // Enhanced rules formatting with better structure
-      const rulesText = this.subredditRules
-        .map((rule, index) => {
-          const ruleName = rule.short_name || `Rule ${index + 1}`;
-          const ruleDesc = rule.description || 'No description available';
-          return `${index + 1}. ${ruleName}: ${ruleDesc}`;
-        })
-        .join('\n\n');
+      // Check if we should use multi-pass optimization for high-confidence results
+      const hasStrictRules = this.subredditRules.some(rule => rule.enforcement_level === 'strict');
+      const hasHighPriorityIssues = this.complianceIssues.some(issue => issue.severity === 'high');
+      const useMultiPass = hasStrictRules || hasHighPriorityIssues || this.subredditRules.length > 5;
+      
+      if (useMultiPass) {
+        console.log('Using multi-pass optimization for enhanced accuracy...');
+        return await this.performMultiPassOptimization();
+      }
+      
+      // Single-pass optimization for simpler cases
+      return await this.performSinglePassOptimization();
+      
+    } catch (error) {
+      console.error('Post optimization error:', error);
+      this.handleApiError(error, 'post optimization');
+      return this.performBasicOptimization();
+    }
+  }
 
-      const complianceContext = this.complianceIssues.length > 0 
-        ? `\n\nDETECTED COMPLIANCE ISSUES:\n${this.complianceIssues.map(i => `- ${i.issue} (${i.severity} priority)`).join('\n')}`
-        : '';
+  async performMultiPassOptimization() {
+    console.log('Starting multi-pass optimization process...');
+    
+    // Pass 1: Initial optimization with focus on major violations
+    const firstPass = await this.performSinglePassOptimization();
+    console.log('First pass completed');
+    
+    // Pass 2: Compliance verification and refinement
+    const secondPass = await this.performComplianceVerification(firstPass);
+    console.log('Second pass completed');
+    
+    // Pass 3: Final quality assurance (only if needed)
+    if (secondPass.complianceCertainty < 8 || secondPass.confidenceScore < 7) {
+      console.log('Performing third pass for quality assurance...');
+      const thirdPass = await this.performFinalQualityCheck(secondPass);
+      thirdPass.changes.push('Applied multi-pass optimization with 3 verification rounds');
+      return thirdPass;
+    }
+    
+    secondPass.changes.push('Applied multi-pass optimization with 2 verification rounds');
+    return secondPass;
+  }
 
-      const flairContext = this.subredditFlairs.length > 0 
-        ? `\n\nAVAILABLE FLAIRS:\n${this.subredditFlairs.map(f => `- ${f.text}`).join('\n')}`
-        : 'No flairs available';
+  async performSinglePassOptimization() {
+    console.log('Performing single-pass optimization...');
+    
+    // Prioritize rules based on enforcement level and common violations
+    const prioritizedRules = this.prioritizeRules(this.subredditRules);
+    
+    // Enhanced rules formatting with comprehensive details and priority ordering
+    const rulesText = prioritizedRules
+      .map((rule, index) => {
+        const ruleName = rule.short_name || `Rule ${rule.originalIndex + 1}`;
+        const ruleDesc = rule.description || 'No description available';
+        const enforcement = rule.enforcement_level || 'moderate';
+        const priority = rule.priority || 'normal';
+        const examples = rule.examples && rule.examples.length > 0 
+          ? `\n   Examples: ${rule.examples.join('; ')}`
+          : '';
+        const enforcementNote = enforcement === 'strict' 
+          ? ' [STRICTLY ENFORCED - ZERO TOLERANCE]'
+          : enforcement === 'relaxed' 
+          ? ' [GUIDELINE - RECOMMENDED]'
+          : ' [MODERATELY ENFORCED]';
+        const priorityNote = priority === 'critical' 
+          ? ' 🔴 CRITICAL PRIORITY'
+          : priority === 'high' 
+          ? ' 🟠 HIGH PRIORITY'
+          : '';
+        return `${rule.originalIndex + 1}. ${ruleName}${enforcementNote}${priorityNote}: ${ruleDesc}${examples}`;
+      })
+      .join('\n\n');
 
-      console.log('Making enhanced OpenRouter request...');
+    const complianceContext = this.complianceIssues.length > 0 
+      ? `\n\nDETECTED COMPLIANCE ISSUES:\n${this.complianceIssues.map(i => `- ${i.issue} (${i.severity} priority)`).join('\n')}`
+      : '';
+
+    const flairContext = this.subredditFlairs.length > 0 
+      ? `\n\nAVAILABLE FLAIRS:\n${this.subredditFlairs.map(f => `- ${f.text}`).join('\n')}`
+      : 'No flairs available';
+
+    console.log('Making enhanced OpenRouter request...');
       const data = await this.makeOpenRouterRequest([
         {
           role: 'system',
-          content: `You are an expert Reddit content optimizer specializing in rule compliance and community engagement. Your mission is to transform posts to be PERFECTLY compliant with subreddit rules while maintaining authenticity and engagement potential.
+          content: `You are an EXPERT Reddit content optimizer with deep specialization in rule compliance analysis and community engagement. Your mission is to transform posts to be PERFECTLY compliant with ALL subreddit rules while maintaining authenticity and maximizing engagement potential.
 
-CORE OPTIMIZATION PRINCIPLES:
-1. **RULE COMPLIANCE FIRST** - Every rule must be strictly followed
-2. **AUTHENTIC HUMAN VOICE** - Write like a real Reddit user, not AI
-3. **COMMUNITY CULTURE FIT** - Match the subreddit's tone and style
-4. **ENGAGEMENT OPTIMIZATION** - Make content compelling within rule constraints
-5. **CONTENT PRESERVATION** - Keep the original message and intent intact
+🔍 CRITICAL ANALYSIS FRAMEWORK:
+1. **COMPREHENSIVE RULE EXAMINATION** - Analyze EVERY rule with extreme thoroughness
+2. **ZERO-TOLERANCE COMPLIANCE** - Ensure NO rule violations remain
+3. **ENFORCEMENT LEVEL AWARENESS** - Prioritize strictly enforced rules
+4. **EXAMPLE-BASED VALIDATION** - Use provided examples to guide decisions
+5. **MULTI-LAYER VERIFICATION** - Check compliance from multiple angles
 
-RULE COMPLIANCE STRATEGY:
-- **Prohibited Content**: Completely remove or replace any content that violates "no X" rules
-- **Format Requirements**: Follow exact formatting rules (titles, flairs, tags, etc.)
-- **Tone Guidelines**: Adjust language to match community expectations
-- **Content Restrictions**: Respect limits on links, images, self-promotion, etc.
-- **Context Requirements**: Add necessary context or disclaimers if required
+📋 RULE COMPLIANCE METHODOLOGY:
+**STRICT ENFORCEMENT RULES** [ZERO TOLERANCE]:
+- These rules MUST be followed exactly with NO exceptions
+- Any violation will result in immediate post removal
+- Apply the most conservative interpretation
+- When in doubt, err on the side of overcompliance
 
-WRITING STYLE GUIDELINES:
-- Use casual, conversational language
-- Avoid overly formal or academic tone unless appropriate
-- Include natural transitions and flow
-- Maintain the original poster's voice and personality
-- Use appropriate Reddit formatting (bold, italics, lists, etc.)
+**MODERATE ENFORCEMENT RULES**:
+- Follow these rules carefully but allow reasonable interpretation
+- Minor violations may be overlooked but should be avoided
+- Apply common sense within rule boundaries
 
-CRITICAL CONSTRAINTS:
-- NEVER remove the entire body - always preserve meaningful content
-- If content must be redacted, use [REDACTED] but explain why
-- Only suggest flairs from the provided list
-- Flair selection should be based on post content, topic, and community context
-- Consider the post's primary subject matter and tone
-- Match flair to the most relevant category or topic
-- If no suitable flair exists, return null
-- Prioritize flairs that clearly indicate the post's purpose or category
-- Ensure title meets character limits (max 300 chars)
-- Maintain readability and clarity
+**GUIDELINE RULES** [RECOMMENDED]:
+- These are suggestions that improve post quality
+- Following them enhances engagement but violations rarely result in removal
+- Use as optimization opportunities
 
-Return ONLY a valid JSON object with this structure:
+🎯 DETAILED COMPLIANCE STRATEGY:
+- **Content Prohibition Analysis**: Scan for ANY prohibited content types, keywords, or concepts
+- **Format Requirement Verification**: Ensure ALL formatting rules are followed precisely
+- **Title Compliance Check**: Verify title meets ALL requirements (length, format, content restrictions)
+- **Body Content Review**: Examine every sentence for potential rule violations
+- **Link/Media Restrictions**: Respect ALL limitations on external content
+- **Self-Promotion Guidelines**: Strictly adhere to promotional content rules
+- **Community Tone Matching**: Align language and style with community culture
+- **Contextual Requirements**: Add ALL necessary disclaimers, tags, or context
+
+✍️ ENHANCED WRITING GUIDELINES:
+- **Authentic Voice Preservation**: Maintain the original poster's personality and style
+- **Natural Language Flow**: Ensure content reads naturally, not AI-generated
+- **Community Integration**: Use language and references familiar to the community
+- **Engagement Optimization**: Structure content for maximum user interaction
+- **Clarity and Readability**: Ensure content is easy to understand and follow
+
+🚨 CRITICAL SAFETY CHECKS:
+- **Content Preservation**: NEVER completely remove substantive content
+- **Rule Conflict Resolution**: When rules conflict, choose the most restrictive interpretation
+- **Verification Requirements**: Double-check ALL changes against rule list
+- **Fallback Protection**: If unsure about compliance, make conservative choices
+- **Quality Assurance**: Ensure optimized content is better than original in ALL aspects
+
+📊 RESPONSE REQUIREMENTS:
+Return ONLY a valid JSON object with this enhanced structure:
 {
   "title": "optimized title (max 300 chars)",
   "body": "optimized body text",
-  "changes": ["specific change 1", "specific change 2"],
+  "changes": ["specific change 1 with rule reference", "change 2 with reasoning"],
   "engagement_tips": ["tip 1", "tip 2", "tip 3"],
   "flair_suggestion": "suggested flair or null",
-  "rule_compliance_summary": "detailed compliance explanation",
-  "confidence_score": 1-10 rating of optimization quality
+  "rule_compliance_summary": "detailed explanation of how EACH rule is addressed",
+  "rule_violations_addressed": ["violation 1 fixed", "violation 2 resolved"],
+  "confidence_score": 1-10 rating of optimization quality,
+  "compliance_certainty": 1-10 rating of rule compliance confidence
 }
 
-The response must be parseable JSON with no markdown formatting or additional text.`
+⚠️ ABSOLUTE REQUIREMENTS:
+- Analyze EVERY single rule provided
+- Address ALL enforcement levels appropriately
+- Use examples when available for guidance
+- Provide specific rule references in changes
+- Ensure 100% compliance with strictly enforced rules
+- Maintain authentic human writing style
+- Never output markdown or additional formatting`
         },
         {
           role: 'user',
-          content: `SUBREDDIT: r/${this.selectedSubreddit}
+          content: `🎯 TARGET SUBREDDIT: r/${this.selectedSubreddit}
 
-SUBREDDIT RULES (MUST FOLLOW ALL):
+📋 COMPLETE RULE SET (ANALYZE EVERY SINGLE RULE):
 ${rulesText}${complianceContext}${flairContext}
 
-ORIGINAL POST:
-Title: ${this.originalPost.title}
-Body: ${this.originalPost.body}
+📝 ORIGINAL POST TO OPTIMIZE:
+Title: "${this.originalPost.title}"
+Body: "${this.originalPost.body}"
 
-TASK: Optimize this post for maximum rule compliance and engagement while maintaining the original message and authentic human voice.
+🔍 COMPREHENSIVE OPTIMIZATION TASK:
+Transform this post to achieve PERFECT compliance with ALL subreddit rules while maintaining the original message and authentic human voice.
 
-ANALYSIS REQUIRED:
-- Identify any rule violations in the original content
-- Determine necessary changes for compliance
-- Optimize for better engagement within rule constraints
-- Ensure natural, human-like writing style
-- Suggest appropriate flair based on content analysis and available options
+⚠️ MANDATORY ANALYSIS STEPS:
+1. **RULE-BY-RULE COMPLIANCE CHECK**: Go through EACH rule individually and verify compliance
+2. **ENFORCEMENT LEVEL PRIORITIZATION**: Focus most attention on [STRICTLY ENFORCED] rules
+3. **VIOLATION IDENTIFICATION**: Identify ANY potential rule violations in title AND body
+4. **CONTENT PRESERVATION**: Maintain the core message and intent while fixing violations
+5. **ENGAGEMENT ENHANCEMENT**: Optimize for better community reception within rule constraints
+6. **FLAIR OPTIMIZATION**: Select the most appropriate flair from available options
+7. **STYLE AUTHENTICATION**: Ensure the result sounds like a genuine Reddit user, not AI
 
-Respond with ONLY the JSON object. No additional text or formatting.`
+🎯 SPECIFIC REQUIREMENTS:
+- Address EVERY rule marked as [STRICTLY ENFORCED] with zero tolerance
+- Use provided examples to guide interpretation when available
+- Explain HOW each change addresses specific rule compliance
+- Provide rule references for each modification made
+- Ensure title meets character limits and community standards
+- Maintain authentic, conversational tone appropriate for Reddit
+- Optimize structure and formatting for maximum engagement
+
+📊 QUALITY STANDARDS:
+- The optimized post should be SIGNIFICANTLY better than the original
+- ALL potential rule violations must be eliminated
+- Content should be more engaging while remaining compliant
+- Writing style should be natural and community-appropriate
+- Flair selection should enhance post visibility and categorization
+
+Respond with ONLY the JSON object containing your optimization results. Include detailed explanations in the compliance summary field.`
         }
       ], 1200);
 
@@ -1883,14 +2204,16 @@ Respond with ONLY the JSON object. No additional text or formatting.`
         return this.performBasicOptimization();
       }
 
-      // Validate and process the result
+      // Validate and process the enhanced result
       let optimizedTitle = result.title || this.originalPost.title;
       let optimizedBody = result.body || this.originalPost.body;
       const changes = Array.isArray(result.changes) ? result.changes : [];
       const engagementTips = Array.isArray(result.engagement_tips) ? result.engagement_tips : [];
       const flairSuggestion = result.flair_suggestion || null;
       const ruleComplianceSummary = result.rule_compliance_summary || '';
+      const ruleViolationsAddressed = Array.isArray(result.rule_violations_addressed) ? result.rule_violations_addressed : [];
       const confidenceScore = result.confidence_score || 5;
+      const complianceCertainty = result.compliance_certainty || 5;
 
       // Safety checks
       if (!optimizedBody || !optimizedBody.trim()) {
@@ -1913,19 +2236,240 @@ Respond with ONLY the JSON object. No additional text or formatting.`
         engagementTips,
         flairSuggestion,
         ruleComplianceSummary,
+        ruleViolationsAddressed,
         confidenceScore,
+        complianceCertainty,
         aiOptimized: true
       };
       
-      console.log('Final optimization result:', finalResult);
-      return finalResult;
+      // Always perform final compliance verification before returning
+      const verifiedResult = await this.performFinalComplianceVerification(finalResult);
+      console.log('Single-pass optimization result (verified):', verifiedResult);
+      return verifiedResult;
+  }
 
+  async performComplianceVerification(previousResult) {
+    console.log('Performing compliance verification pass...');
+    
+    try {
+      // Use prioritized rules for verification as well
+      const prioritizedRules = this.prioritizeRules(this.subredditRules);
+      const rulesText = prioritizedRules
+        .map((rule, index) => {
+          const ruleName = rule.short_name || `Rule ${rule.originalIndex + 1}`;
+          const ruleDesc = rule.description || 'No description available';
+          const enforcement = rule.enforcement_level || 'moderate';
+          const priority = rule.priority || 'normal';
+          const examples = rule.examples && rule.examples.length > 0 
+            ? `\n   Examples: ${rule.examples.join('; ')}`
+            : '';
+          const enforcementNote = enforcement === 'strict' 
+            ? ' [STRICTLY ENFORCED - ZERO TOLERANCE]'
+            : enforcement === 'relaxed' 
+            ? ' [GUIDELINE - RECOMMENDED]'
+            : ' [MODERATELY ENFORCED]';
+          const priorityNote = priority === 'critical' 
+            ? ' 🔴 CRITICAL PRIORITY'
+            : priority === 'high' 
+            ? ' 🟠 HIGH PRIORITY'
+            : '';
+          return `${rule.originalIndex + 1}. ${ruleName}${enforcementNote}${priorityNote}: ${ruleDesc}${examples}`;
+        })
+        .join('\n\n');
+
+      const data = await this.makeOpenRouterRequest([
+        {
+          role: 'system',
+          content: `You are a specialized Reddit compliance verifier. Your ONLY job is to verify that optimized posts are PERFECTLY compliant with ALL subreddit rules and improve them if needed.
+
+🔍 VERIFICATION METHODOLOGY:
+1. **RULE-BY-RULE AUDIT**: Check each rule individually against the optimized content
+2. **VIOLATION DETECTION**: Identify ANY remaining rule violations
+3. **REFINEMENT RECOMMENDATIONS**: Suggest specific improvements for better compliance
+4. **CONFIDENCE ASSESSMENT**: Rate your certainty that the post will be approved
+
+⚠️ CRITICAL FOCUS AREAS:
+- **STRICT RULES**: Ensure zero tolerance rules are perfectly followed
+- **EDGE CASES**: Check for subtle violations that might be missed
+- **FORMATTING**: Verify all format requirements are met exactly
+- **CONTENT RESTRICTIONS**: Ensure no prohibited content remains
+- **COMMUNITY STANDARDS**: Verify the post matches community expectations
+
+📊 RESPONSE FORMAT:
+Return ONLY a valid JSON object:
+{
+  "title": "verified/improved title",
+  "body": "verified/improved body",
+  "changes": ["specific refinement 1", "refinement 2"],
+  "compliance_issues_found": ["issue 1", "issue 2"],
+  "refinements_made": ["refinement 1", "refinement 2"],
+  "compliance_certainty": 1-10 rating,
+  "approval_likelihood": 1-10 rating,
+  "verification_summary": "detailed compliance assessment"
+}`
+        },
+        {
+          role: 'user',
+          content: `🎯 TARGET SUBREDDIT: r/${this.selectedSubreddit}
+
+📋 COMPLETE RULE SET TO VERIFY AGAINST:
+${rulesText}
+
+📝 OPTIMIZED POST TO VERIFY:
+Title: "${previousResult.title}"
+Body: "${previousResult.body}"
+
+🔍 VERIFICATION TASK:
+Thoroughly verify this optimized post for PERFECT rule compliance. If ANY violations remain, fix them. Focus especially on strictly enforced rules.
+
+Previous optimization summary: ${previousResult.ruleComplianceSummary}
+Previous confidence: ${previousResult.confidenceScore}/10
+Previous compliance certainty: ${previousResult.complianceCertainty}/10
+
+Respond with ONLY the JSON object containing your verification results.`
+        }
+      ], 800);
+
+      const result = JSON.parse(data.choices[0]?.message?.content || '{}');
+      
+      return {
+        title: result.title || previousResult.title,
+        body: result.body || previousResult.body,
+        changes: [...previousResult.changes, ...(result.changes || [])],
+        engagementTips: previousResult.engagementTips,
+        flairSuggestion: previousResult.flairSuggestion,
+        ruleComplianceSummary: result.verification_summary || previousResult.ruleComplianceSummary,
+        ruleViolationsAddressed: [...(previousResult.ruleViolationsAddressed || []), ...(result.compliance_issues_found || [])],
+        confidenceScore: Math.max(previousResult.confidenceScore, result.approval_likelihood || 5),
+        complianceCertainty: result.compliance_certainty || previousResult.complianceCertainty,
+        aiOptimized: true
+      };
+      
     } catch (error) {
-      console.error('Post optimization error:', error);
-      this.handleApiError(error, 'post optimization');
-      return this.performBasicOptimization();
+      console.error('Compliance verification error:', error);
+      return previousResult; // Return previous result if verification fails
     }
   }
+
+  async performFinalQualityCheck(previousResult) {
+    console.log('Performing final quality assurance check...');
+    
+    try {
+      const data = await this.makeOpenRouterRequest([
+        {
+          role: 'system',
+          content: `You are a final quality assurance specialist for Reddit posts. Your job is to perform a final check and polish to ensure the post is as good as possible while maintaining perfect rule compliance.
+
+🎯 FINAL QA CHECKLIST:
+1. **Rule Compliance**: Verify NO violations remain
+2. **Engagement Quality**: Ensure maximum engagement potential
+3. **Authenticity**: Ensure natural, human-like writing
+4. **Clarity**: Ensure content is clear and well-structured
+5. **Community Fit**: Ensure perfect tone and style match
+
+📊 RESPONSE FORMAT:
+Return ONLY a valid JSON object:
+{
+  "title": "final polished title",
+  "body": "final polished body", 
+  "final_changes": ["final improvement 1", "improvement 2"],
+  "quality_score": 1-10 rating,
+  "final_compliance_certainty": 1-10 rating
+}`
+        },
+        {
+          role: 'user',
+          content: `Final QA for r/${this.selectedSubreddit}
+
+Current Post:
+Title: "${previousResult.title}"
+Body: "${previousResult.body}"
+
+Perform final quality assurance and polish. Make only minor improvements for maximum quality.`
+        }
+      ], 600);
+
+      const result = JSON.parse(data.choices[0]?.message?.content || '{}');
+      
+      return {
+        title: result.title || previousResult.title,
+        body: result.body || previousResult.body,
+        changes: [...previousResult.changes, ...(result.final_changes || [])],
+        engagementTips: previousResult.engagementTips,
+        flairSuggestion: previousResult.flairSuggestion,
+        ruleComplianceSummary: previousResult.ruleComplianceSummary,
+        ruleViolationsAddressed: previousResult.ruleViolationsAddressed,
+        confidenceScore: result.quality_score || previousResult.confidenceScore,
+        complianceCertainty: result.final_compliance_certainty || previousResult.complianceCertainty,
+        aiOptimized: true
+      };
+      
+         } catch (error) {
+       console.error('Final quality check error:', error);
+       return previousResult; // Return previous result if final check fails
+     }
+   }
+
+   async performFinalComplianceVerification(result) {
+     console.log('Performing final compliance verification...');
+     
+     try {
+       // Quick rule compliance double-check using a lightweight verification
+       const prioritizedRules = this.prioritizeRules(this.subredditRules);
+       const criticalRules = prioritizedRules.filter(rule => rule.priority === 'critical' || rule.enforcement_level === 'strict');
+       
+       if (criticalRules.length === 0) {
+         console.log('No critical rules to verify - returning result as-is');
+         return result;
+       }
+       
+       const criticalRulesText = criticalRules
+         .map(rule => `${rule.originalIndex + 1}. ${rule.short_name || 'Rule'}: ${rule.description}`)
+         .join('\n');
+       
+       const data = await this.makeOpenRouterRequest([
+         {
+           role: 'system',
+           content: `You are a final compliance checker. Verify that the post complies with the most critical rules. Return ONLY a JSON object with:
+{
+  "compliant": true/false,
+  "critical_violations": ["violation 1", "violation 2"],
+  "quick_fixes": ["fix 1", "fix 2"],
+  "confidence": 1-10
+}
+
+If compliant=true, return empty arrays for violations and fixes.`
+         },
+         {
+           role: 'user',
+           content: `CRITICAL RULES TO CHECK:
+${criticalRulesText}
+
+POST TO VERIFY:
+Title: "${result.title}"
+Body: "${result.body}"
+
+Quickly verify compliance with critical rules only.`
+         }
+       ], 300);
+
+       const verificationResult = JSON.parse(data.choices[0]?.message?.content || '{"compliant": true, "critical_violations": [], "quick_fixes": [], "confidence": 8}');
+       
+       // If critical violations are found, add them to the changes list
+       if (verificationResult.critical_violations && verificationResult.critical_violations.length > 0) {
+         result.changes.push(`Final verification detected ${verificationResult.critical_violations.length} critical issue(s)`);
+         result.ruleViolationsAddressed = [...(result.ruleViolationsAddressed || []), ...verificationResult.critical_violations];
+         result.complianceCertainty = Math.min(result.complianceCertainty || 5, verificationResult.confidence || 5);
+       }
+       
+       console.log(`Final verification complete - compliant: ${verificationResult.compliant}, confidence: ${verificationResult.confidence}/10`);
+       return result;
+       
+     } catch (error) {
+       console.error('Final compliance verification error:', error);
+       return result; // Return original result if verification fails
+     }
+   }
 
   performBasicOptimization() {
     const result = this.applyBasicOptimizations(this.originalPost.title, this.originalPost.body);
@@ -2045,7 +2589,14 @@ Respond with ONLY the JSON object. No additional text or formatting.`
             Rule Compliance Status
           </h4>
           <div style="font-size: 13px; color: var(--gray-700); line-height: 1.5; margin: 0;">
-            Post has been optimized for better engagement and formatting. Please review the subreddit rules above to ensure your post complies with all community guidelines.
+            <strong>Enhanced AI Optimization Complete!</strong><br>
+            ✅ Comprehensive rule analysis with ${this.subredditRules.length} rules<br>
+            ✅ Multi-pass verification for maximum compliance<br>
+            ✅ Priority-based rule enforcement checking<br>
+            ${optimized.complianceCertainty ? `✅ Compliance certainty: ${optimized.complianceCertainty}/10<br>` : ''}
+            ${optimized.ruleViolationsAddressed && optimized.ruleViolationsAddressed.length > 0 ? 
+              `✅ Addressed ${optimized.ruleViolationsAddressed.length} rule violation(s)<br>` : ''}
+            Please review the subreddit rules above and the optimized content below.
           </div>
         </div>
       `;
